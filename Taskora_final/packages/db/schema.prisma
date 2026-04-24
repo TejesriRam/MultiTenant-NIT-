@@ -1,0 +1,117 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ─── Enums ────────────────────────────────────────────────────────────────────
+
+enum TaskStatus {
+  TODO
+  IN_PROGRESS
+  DONE
+}
+
+enum MemberRole {
+  OWNER
+  ADMIN
+  MEMBER
+}
+
+enum LogAction {
+  TASK_CREATED
+  TASK_UPDATED
+  TASK_DELETED
+  TASK_RESTORED
+  MEMBER_ADDED
+  ROLE_UPDATED
+  MEMBER_REMOVED
+}
+
+enum EntityType {
+  TASK
+  MEMBER
+}
+
+// ─── Models ───────────────────────────────────────────────────────────────────
+
+model User {
+  id           String   @id @default(cuid())
+  email        String   @unique
+  name         String
+  password     String
+  // FIX: required by auth flow to persist hashed refresh tokens
+  refreshToken String?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  memberships  Membership[]
+  tasks        Task[]        @relation("TaskCreatedBy")
+  activityLogs ActivityLog[] @relation("LogActor")
+}
+
+model Organization {
+  id        String   @id @default(cuid())
+  name      String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  memberships  Membership[]
+  tasks        Task[]
+  activityLogs ActivityLog[]
+}
+
+model Membership {
+  id             String     @id @default(cuid())
+  userId         String
+  organizationId String
+  role           MemberRole @default(MEMBER)
+  createdAt      DateTime   @default(now())
+
+  user         User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, organizationId])
+}
+
+model Task {
+  id             String     @id @default(cuid())
+  title          String
+  description    String?
+  status         TaskStatus @default(TODO)
+  organizationId String
+  createdById    String
+  createdAt      DateTime   @default(now())
+  updatedAt      DateTime   @updatedAt
+  // FIX: required for soft-delete / Trash functionality
+  deletedAt      DateTime?
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  createdBy    User         @relation("TaskCreatedBy", fields: [createdById], references: [id])
+
+  @@index([organizationId, deletedAt])
+  @@index([organizationId, status])
+}
+
+model ActivityLog {
+  id             String     @id @default(cuid())
+  actorId        String
+  organizationId String
+  action         LogAction
+  entityType     EntityType
+  entityId       String
+  metadata       Json       @default("{}")
+  createdAt      DateTime   @default(now())
+
+  // FIX: relation name must be "LogActor" — this is what Prisma uses to
+  // generate the 'actor' accessor on ActivityLog (not 'user')
+  actor        User         @relation("LogActor", fields: [actorId], references: [id])
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  @@index([organizationId, createdAt(sort: Desc)])
+  @@index([organizationId, action])
+  @@index([entityId])
+}
